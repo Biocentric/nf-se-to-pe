@@ -1,0 +1,12 @@
+.nextflow/
+.nextflow.log*
+work/
+results/
+results_*/
+*.sif
+*.img
+.singularity-cache/
+__pycache__/
+*.pyc
+.DS_Store
+tmp_test/

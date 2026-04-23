@@ -1,0 +1,2 @@
+sample,fastq
+test_sample,https://raw.githubusercontent.com/nf-core/test-datasets/rnaseq/testdata/GSE110004/SRR6357070_1.fastq.gz
