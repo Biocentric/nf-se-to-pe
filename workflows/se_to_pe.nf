@@ -6,6 +6,7 @@ include { MULTIQC           } from '../modules/nf-core/multiqc/main'
 
 workflow SE_TO_PE_PIPELINE {
 
+    main:
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
 
