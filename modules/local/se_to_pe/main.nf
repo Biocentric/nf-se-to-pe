@@ -3,7 +3,7 @@ process SE_TO_PE {
     label 'process_low'
 
     conda "conda-forge::python=3.11"
-    container 'python:3.11-slim'
+    container 'python:3.11'
 
     input:
     tuple val(meta), path(reads)

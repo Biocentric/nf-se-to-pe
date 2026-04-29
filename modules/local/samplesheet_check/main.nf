@@ -3,7 +3,7 @@ process SAMPLESHEET_CHECK {
     label 'process_single'
 
     conda "conda-forge::python=3.11"
-    container 'python:3.11-slim'
+    container 'python:3.11'
 
     input:
     path samplesheet
