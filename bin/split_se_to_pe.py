@@ -37,17 +37,22 @@ def rename_for_pair(header: str, mate: int) -> str:
     return f"{header}/{mate}"
 
 
-def split_record(seq: str, qual: str, gap: int, min_mate_len: int,
-                 jitter: int):
+def split_record(seq: str, qual: str, gap_target: int, jitter_target: int,
+                 min_mate_len: int, rng: random.Random):
     L = len(seq)
-    if L < 2 * min_mate_len + gap + jitter:
+    max_extra = L - 2 * min_mate_len
+    if max_extra < 0:
         return None
-    usable = L - gap - jitter
+    gap = min(gap_target, max_extra)
+    j_max = min(jitter_target, max_extra - gap)
+    j = rng.randint(0, j_max) if j_max > 0 else 0
+    drop = gap + j
+    usable = L - drop
     r1_len = (usable + 1) // 2
     r2_len = usable - r1_len
     r1_seq = seq[:r1_len]
     r1_qual = qual[:r1_len]
-    r2_start = r1_len + gap + jitter
+    r2_start = r1_len + drop
     r2_seq_fwd = seq[r2_start:r2_start + r2_len]
     r2_qual_fwd = qual[r2_start:r2_start + r2_len]
     r2_seq = revcomp(r2_seq_fwd)
@@ -65,11 +70,15 @@ def main():
     ap.add_argument("--r1", required=True, help="Output R1 FASTQ(.gz)")
     ap.add_argument("--r2", required=True, help="Output R2 FASTQ(.gz)")
     ap.add_argument("--gap-size", type=int, default=10,
-                    help="Base gap between R1 and R2 to simulate insert gap.")
+                    help="Target gap between R1 and R2. Auto-shrinks per read "
+                         "down to 0 if the read is too short to hold both "
+                         "mates plus the full gap.")
     ap.add_argument("--jitter-max", type=int, default=0,
-                    help="Max random extra bp dropped at R2 start per read "
-                         "(drawn uniformly from [0, jitter_max]). Breaks "
-                         "MarkDuplicates grouping when >0.")
+                    help="Target max random extra bp dropped at R2 start per "
+                         "read (drawn uniformly from [0, jitter_max]). "
+                         "Auto-shrinks if the read can't fit both mates plus "
+                         "gap plus jitter. Breaks MarkDuplicates grouping "
+                         "when >0.")
     ap.add_argument("--seed", type=int, default=42,
                     help="RNG seed for jitter (reproducibility).")
     ap.add_argument("--min-mate-len", type=int, default=30,
@@ -105,8 +114,8 @@ def main():
             total_bp_in += len(s)
             if len(s) != len(q):
                 sys.exit(f"Seq/qual length mismatch at record {n_in}")
-            j = rng.randint(0, args.jitter_max) if args.jitter_max > 0 else 0
-            split = split_record(s, q, args.gap_size, args.min_mate_len, j)
+            split = split_record(s, q, args.gap_size, args.jitter_max,
+                                 args.min_mate_len, rng)
             if split is None:
                 n_dropped += 1
                 continue

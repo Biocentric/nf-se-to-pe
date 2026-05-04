@@ -83,14 +83,22 @@ normal_01,/path/to/normal_01.fastq.gz
 
 ## How the conversion works
 
-For an input SE read of length `L` with `gap_size=G` and per-read random
-jitter `j ∈ [0, jitter_max]`:
+For an input SE read of length `L`, the conversion is **adaptive** — gap
+and jitter shrink for short reads so that data with variable read
+lengths (e.g. quality-trimmed reads) is preserved as much as possible:
 
-- `usable = L − G − j`
+- `max_extra = L − 2 × min_mate_len`
+- Reads shorter than `2 × min_mate_len` are dropped
+- `effective_gap = min(gap_size, max_extra)`
+- `j ~ Uniform(0, min(jitter_max, max_extra − effective_gap))`
+- `drop = effective_gap + j`, `usable = L − drop`
 - `r1_len = ⌈usable / 2⌉`, `r2_len = usable − r1_len`
 - **R1** = `seq[0 : r1_len]`, original quality
-- **R2** = reverse-complement of `seq[r1_len + G + j : r1_len + G + j + r2_len]`, with the quality string reversed (not complemented)
-- Reads shorter than `2 × min_mate_len + G + jitter_max` are dropped
+- **R2** = reverse-complement of `seq[r1_len + drop : r1_len + drop + r2_len]`, with quality reversed (not complemented)
+
+For long reads the configured `gap_size` and `jitter_max` are used in
+full. For reads that can only fit two minimum-length mates, gap and
+jitter shrink to 0 and the read is split exactly in half.
 
 Read headers are rewritten to pair cleanly: Illumina-style headers with
 `1:N:0:…` become `1:N:0:…` / `2:N:0:…`; `/1` suffixes become `/1` / `/2`;
