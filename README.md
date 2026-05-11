@@ -104,6 +104,40 @@ Read headers are rewritten to pair cleanly: Illumina-style headers with
 `1:N:0:…` become `1:N:0:…` / `2:N:0:…`; `/1` suffixes become `/1` / `/2`;
 bare headers get `/1` / `/2` appended.
 
+## Scope: SNV/indel only — do not use the output for SV calling
+
+This pipeline is intended for **somatic SNV and small-indel calling**
+(Mutect2, Strelka2, VarScan2, LoFreq, etc.). Its output is **unsafe for
+structural variant calling** and should not be fed to Manta, Delly,
+GRIDSS, LUMPY, ESVEE, or any other PE-aware SV caller.
+
+The reason is informational, not implementation:
+
+- **Paired-end discordance is fabricated.** All pairs are FR-oriented by
+  construction; the fragment-size distribution is a narrow spike at
+  `gap_size + jitter` (~10–13 bp by default), not the 200–1000 bp range
+  that PE SV callers expect. ESVEE in particular has hard-coded
+  thresholds like `max(1000, 99.75% percentile)` that degenerate on this
+  input.
+- **Split-read evidence is fragmented.** A breakpoint that fell inside
+  the dropped gap leaves no evidence in either mate; a breakpoint that
+  fell elsewhere is divided between R1 and R2 instead of producing one
+  clean split read.
+- **Orientation-based signals are erased.** Inversions, translocations,
+  and chimeras leave their fingerprint in discordant orientations
+  (FF/RR/RF) that cannot be reconstructed from SE input.
+
+For SV calling on SE data, **run on the original SE FASTQ with SE-aware
+tools** (`pindel -iSE`, `manta` SE mode, GRIDSS `--singleend`, or
+depth-based callers like `CNVkit` / `Control-FREEC`). Expect ~50%
+sensitivity vs real PE data, but the calls will be real rather than
+conversion artifacts.
+
+If your workflow needs both somatic SNVs and SVs, run two parallel
+branches off the same SE input: `nf-se-to-pe → Mutect2` for SNVs,
+`bwa SE → SE-aware SV caller` for SVs. Do not try to make one converted
+dataset serve both.
+
 ## Downstream caveats for somatic variant calling
 
 The generated PE data preserves the original bases exactly but is still
