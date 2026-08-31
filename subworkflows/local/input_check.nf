@@ -10,8 +10,8 @@ workflow INPUT_CHECK {
         .splitCsv ( header: true, sep: ',' )
         .map { row ->
             def meta = [ id: row.sample, single_end: true ]
-            def fq   = file(row.fastq, checkIfExists: true)
-            [ meta, fq ]
+            def rf   = file(row.reads, checkIfExists: true)
+            [ meta, rf ]
         }
         .set { reads }
 

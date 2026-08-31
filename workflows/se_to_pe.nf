@@ -1,8 +1,9 @@
-include { INPUT_CHECK       } from '../subworkflows/local/input_check'
-include { SE_TO_PE          } from '../modules/local/se_to_pe/main'
+include { INPUT_CHECK          } from '../subworkflows/local/input_check'
+include { CRAM_TO_FASTQ        } from '../modules/local/cram_to_fastq/main'
+include { SE_TO_PE             } from '../modules/local/se_to_pe/main'
 include { FASTQC as FASTQC_IN  } from '../modules/nf-core/fastqc/main'
 include { FASTQC as FASTQC_OUT } from '../modules/nf-core/fastqc/main'
-include { MULTIQC           } from '../modules/nf-core/multiqc/main'
+include { MULTIQC              } from '../modules/nf-core/multiqc/main'
 
 workflow SE_TO_PE_PIPELINE {
 
@@ -13,11 +14,29 @@ workflow SE_TO_PE_PIPELINE {
     INPUT_CHECK ( file(params.input, checkIfExists: true) )
     ch_versions = ch_versions.mix(INPUT_CHECK.out.versions)
 
-    FASTQC_IN ( INPUT_CHECK.out.reads )
+    // BAM/CRAM inputs are unpacked to FASTQ first; FASTQ inputs pass straight
+    // through. Everything downstream sees a plain single-end FASTQ.
+    INPUT_CHECK.out.reads
+        .branch { meta, rf ->
+            aligned: rf.name.toLowerCase().endsWith('.bam') || rf.name.toLowerCase().endsWith('.cram')
+            fastq  : true
+        }
+        .set { ch_input }
+
+    ch_fasta = params.fasta
+        ? Channel.fromPath(params.fasta, checkIfExists: true).collect()
+        : Channel.value([])
+
+    CRAM_TO_FASTQ ( ch_input.aligned, ch_fasta )
+    ch_versions = ch_versions.mix(CRAM_TO_FASTQ.out.versions.first())
+
+    ch_se_fastq = ch_input.fastq.mix(CRAM_TO_FASTQ.out.reads)
+
+    FASTQC_IN ( ch_se_fastq )
     ch_versions = ch_versions.mix(FASTQC_IN.out.versions.first())
     ch_multiqc_files = ch_multiqc_files.mix(FASTQC_IN.out.zip.collect{ it[1] })
 
-    SE_TO_PE ( INPUT_CHECK.out.reads )
+    SE_TO_PE ( ch_se_fastq )
     ch_versions = ch_versions.mix(SE_TO_PE.out.versions.first())
 
     ch_pe = SE_TO_PE.out.reads.map { meta, r1, r2 ->

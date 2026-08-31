@@ -9,9 +9,13 @@
 ## Introduction
 
 **Biocentric/nf-se-to-pe** is a bioinformatics pipeline that converts
-single-end (SE) FASTQ data into simulated paired-end (PE) FASTQ data so
-that downstream tools requiring PE input (e.g. somatic variant callers
+single-end (SE) sequencing data into simulated paired-end (PE) FASTQ data
+so that downstream tools requiring PE input (e.g. somatic variant callers
 that expect `_R1`/`_R2` files) can accept it.
+
+Input may be **FASTQ, BAM, or CRAM**. Aligned inputs are unpacked back to
+FASTQ first; a CRAM usually decodes **without you supplying the reference
+genome it was aligned to** (see [Aligned (BAM/CRAM) input](#aligned-bamcram-input)).
 
 The conversion is **sequence-lossless-by-construction**: every output base
 comes from the original SE read, no synthetic sequence or error noise is
@@ -25,10 +29,11 @@ distribution that would cause downstream tools (notably
 ## Pipeline summary
 
 1. Samplesheet validation ([`check_samplesheet.py`](bin/check_samplesheet.py))
-2. Raw FASTQ QC ([`FastQC`](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/))
-3. SE → PE conversion ([`split_se_to_pe.py`](bin/split_se_to_pe.py))
-4. Converted FASTQ QC (`FastQC`)
-5. Aggregate QC report ([`MultiQC`](https://multiqc.info/))
+2. BAM/CRAM → FASTQ unpacking, for aligned inputs only ([`samtools fastq`](https://www.htslib.org/doc/samtools-fasta.html))
+3. Input FASTQ QC ([`FastQC`](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/))
+4. SE → PE conversion ([`split_se_to_pe.py`](bin/split_se_to_pe.py))
+5. Converted FASTQ QC (`FastQC`)
+6. Aggregate QC report ([`MultiQC`](https://multiqc.info/))
 
 ## Quick start
 
@@ -55,19 +60,73 @@ distribution that would cause downstream tools (notably
 
 ## Samplesheet input
 
-You need to create a CSV samplesheet with your input single-end FASTQ
-files. It should look like this:
+Create a CSV samplesheet listing your single-end read files. FASTQ, BAM,
+and CRAM may be mixed freely in one samplesheet:
 
 ```csv
-sample,fastq
+sample,reads
 tumor_01,/path/to/tumor_01.fastq.gz
-normal_01,/path/to/normal_01.fastq.gz
+normal_01,/path/to/normal_01.cram
+archive_07,/path/to/archive_07.bam
 ```
 
-| Column   | Description                                                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `sample` | Custom sample name. Must be unique. Spaces are not allowed.                                                              |
-| `fastq`  | Full path or URL to a single-end FASTQ file. File must end in `.fastq`, `.fq`, `.fastq.gz`, or `.fq.gz`.                 |
+| Column   | Description                                                                                                                       |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `sample` | Custom sample name. Must be unique. Spaces are not allowed.                                                                       |
+| `reads`  | Full path or URL to a single-end read file: `.fastq`/`.fq` (optionally `.gz`), `.bam`, or `.cram`.                                 |
+
+The legacy column name `fastq` is still accepted as an alias for `reads`,
+so samplesheets written before BAM/CRAM support keep working unchanged.
+
+## Aligned (BAM/CRAM) input
+
+BAM and CRAM inputs are converted back to FASTQ with `samtools fastq`
+before splitting. Two details are handled for you:
+
+- **Reverse-strand reads are restored to original orientation.** An
+  aligner stores reverse-strand reads reverse-complemented with the
+  quality string reversed; `samtools fastq` undoes this, so the recovered
+  FASTQ matches the pre-alignment reads base-for-base.
+- **Secondary (`0x100`) and supplementary (`0x800`) alignments are
+  dropped** (`-F 0x900`). These re-present sequence already carried by the
+  primary record, so keeping them would duplicate bases.
+
+### CRAM without the reference genome
+
+CRAM is reference-compressed, so decoding normally needs the exact
+reference the data was aligned to. You usually do **not** need to supply
+it. Each `@SQ` header line carries an `M5` checksum of its reference
+sequence, and htslib resolves the reference by that checksum, checking:
+
+1. `--fasta`, if you passed one
+2. `REF_CACHE` — a local directory of reference chunks (`--ref_cache`)
+3. `REF_PATH` — by default the EBI/ENA reference registry (`--ref_path`)
+
+So a CRAM aligned to any standard genome (GRCh37, GRCh38, hs37d5, …)
+decodes over the network with no local FASTA. There is no need to convert
+CRAM → BAM → FASTQ yourself first; `samtools fastq` reads CRAM directly
+and this pipeline does that in one step.
+
+Practical guidance:
+
+- **Compute nodes with internet access**: nothing to do; the default works.
+- **Offline / air-gapped clusters**: the EBI lookup will fail. Either pass
+  `--fasta /path/to/reference.fa`, or pre-populate a cache on a connected
+  machine and pass `--ref_cache /shared/hts-ref`.
+- **Many samples sharing one reference**: set `--ref_cache` regardless. The
+  first sample populates it and the rest read locally instead of
+  re-fetching from EBI.
+- **Non-standard or in-house reference**: its checksums are not in the EBI
+  registry, so `--fasta` is required.
+
+Reads are emitted in the order they appear in the aligned file
+(coordinate order for a sorted BAM/CRAM), not original sequencing order.
+This is irrelevant to the conversion, which treats each read independently.
+
+Paired-end BAM/CRAM input is rejected with an explicit error rather than
+being silently mangled — this pipeline converts single-end data, so a file
+that already contains paired reads should go to your downstream caller
+directly.
 
 ## Parameters
 
@@ -79,6 +138,10 @@ normal_01,/path/to/normal_01.fastq.gz
 | `--jitter_max`     | Maximum extra bases dropped at R2 start per read, drawn uniformly from `[0, jitter_max]`. Set `0` to disable. | `3`     |
 | `--seed`           | RNG seed for jitter (reproducibility).                                                                   | `42`    |
 | `--min_mate_len`   | Minimum length required per output mate. Shorter input reads are dropped.                                | `30`    |
+| `--fasta`          | Reference FASTA for decoding CRAM input. Optional — see above.                                           | `null`  |
+| `--ref_cache`      | Directory used to cache CRAM reference sequences by MD5. Recommended for multi-sample CRAM runs.          | `null`  |
+| `--ref_path`       | Where htslib looks up CRAM references by MD5 checksum.                                                   | EBI/ENA registry |
+| `--save_se_fastq`  | Publish the FASTQ unpacked from BAM/CRAM. Off by default because it can be as large as the input.        | `false` |
 | `--singularity_cache_dir` | Override the Singularity image cache directory.                                                   | `~/.singularity-cache/se-to-pe` |
 
 ## How the conversion works
@@ -171,6 +234,7 @@ Pipeline structure follows [nf-core](https://nf-co.re/) conventions.
 
 If you use this pipeline, please cite the tools it wraps:
 
+- SAMtools: Danecek P, et al. (2021). Twelve years of SAMtools and BCFtools. *GigaScience*, 10(2): giab008.
 - FastQC: Andrews S. (2010). FastQC: a quality control tool for high throughput sequence data.
 - MultiQC: Ewels P, et al. (2016). MultiQC: summarize analysis results for multiple tools and samples in a single report. *Bioinformatics*, 32(19): 3047–3048.
 - Nextflow: Di Tommaso P, et al. (2017). Nextflow enables reproducible computational workflows. *Nature Biotechnology*, 35: 316–319.

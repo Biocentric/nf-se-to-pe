@@ -12,13 +12,13 @@
                 "pattern": "^\\S+$",
                 "errorMessage": "Sample name must be provided and cannot contain spaces."
             },
-            "fastq": {
+            "reads": {
                 "type": "string",
                 "format": "file-path",
-                "pattern": "^\\S+\\.f(ast)?q(\\.gz)?$",
-                "errorMessage": "FASTQ file must be provided and end with .fastq(.gz) or .fq(.gz)."
+                "pattern": "^\\S+\\.(f(ast)?q(\\.gz)?|bam|cram)$",
+                "errorMessage": "Read file must be provided and end with .fastq(.gz), .fq(.gz), .bam, or .cram."
             }
         },
-        "required": ["sample", "fastq"]
+        "required": ["sample", "reads"]
     }
 }
