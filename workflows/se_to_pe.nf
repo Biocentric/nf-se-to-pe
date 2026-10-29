@@ -45,7 +45,9 @@ workflow SE_TO_PE_PIPELINE {
     FASTQC_OUT ( ch_pe )
     ch_versions = ch_versions.mix(FASTQC_OUT.out.versions.first())
     ch_multiqc_files = ch_multiqc_files.mix(FASTQC_OUT.out.zip.collect{ it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(SE_TO_PE.out.stats.collect{ it[1] })
+    // The *_mqc.tsv carries MultiQC custom-content headers; the plain
+    // stats.tsv is published for humans but MultiQC would ignore it.
+    ch_multiqc_files = ch_multiqc_files.mix(SE_TO_PE.out.mqc.collect{ it[1] })
 
     ch_multiqc_config = params.multiqc_config
         ? Channel.fromPath(params.multiqc_config, checkIfExists: true)
